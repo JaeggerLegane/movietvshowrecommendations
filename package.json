@@ -1,0 +1,20 @@
+{
+  "name": "next-watch",
+  "version": "0.1.0",
+  "description": "Netflix-style movie and TV show recommendations for titles that are not on the NAS yet",
+  "main": "server.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "dev": "node --watch --env-file-if-exists=.env server.js",
+    "mock": "node test/mock-tmdb.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

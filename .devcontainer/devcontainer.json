@@ -1,0 +1,12 @@
+{
+  "name": "Next Watch",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "containerEnv": { "NO_LOGIN": "1" },
+  "secrets": {
+    "TMDB_API_KEY": { "description": "TMDB API Read Access Token (themoviedb.org > Settings > API)" }
+  },
+  "forwardPorts": [3000],
+  "portsAttributes": { "3000": { "label": "Next Watch", "onAutoForward": "openBrowser" } },
+  "postCreateCommand": "npm ci",
+  "postAttachCommand": "npm start"
+}

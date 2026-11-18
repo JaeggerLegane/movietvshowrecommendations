@@ -1,0 +1,56 @@
+# Next Watch on the Synology NAS (Container Manager > Project, path docker/nextwatch/nas).
+# Same setup as the promotion hunter and the family wishlist:
+# - "tailscale" publishes the app on the internet with Tailscale Funnel (no router changes).
+# - "nextwatch" downloads the code from your private GitHub repository and checks GitHub every
+#   5 minutes: when Claude pushes a new version, the NAS updates and restarts the app by itself.
+# - Your movie and TV folders are shared with the app read-only: it can look, never change or delete.
+# Secrets live in .env next to this file (never on GitHub); the GitHub token is filled in below.
+# Folders that must exist next to this file: code, data, tailscale, serve (with serve.json).
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: nextwatch
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY}
+      TS_HOSTNAME: nextwatch
+      TS_AUTH_ONCE: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"
+    volumes:
+      - ./tailscale:/var/lib/tailscale
+      - ./serve:/config:ro
+
+  nextwatch:
+    image: node:22-alpine
+    restart: unless-stopped
+    # Share Tailscale's network, so Funnel reaches the app at 127.0.0.1:3000.
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    env_file: .env
+    environment:
+      GITHUB_TOKEN: "FILL-IN: the GitHub token (read-only, this repository only)"
+      REPO: "JaeggerLegane/next-watch"
+      UPDATE_EVERY: "300"      # seconds between checks for a new version on GitHub
+      DATA_DIR: /data
+      MOVIES_DIR: /library/movies
+      TV_DIR: /library/tv
+      TZ: "Europe/Brussels"
+      NODE_ENV: production
+    volumes:
+      - ./code:/code
+      - ./data:/data
+      # \\jaeggerlegane\media\libraries\... on the NAS itself. If your "media" shared folder
+      # is on another volume, change volume1 (File Station > right-click "media" > Properties shows it).
+      - /volume1/media/libraries/movies:/library/movies:ro
+      - /volume1/media/libraries/tv:/library/tv:ro
+    command:
+      - sh
+      - -c
+      - >-
+        apk add --no-cache git >/dev/null &&
+        if [ ! -d /code/.git ]; then git clone -q "https://x-access-token:$${GITHUB_TOKEN}@github.com/$${REPO}.git" /code; fi &&
+        exec sh /code/nas/run.sh

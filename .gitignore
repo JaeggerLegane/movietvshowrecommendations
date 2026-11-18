@@ -1,0 +1,12 @@
+node_modules/
+data/
+.env
+*.log
+# NAS-only files: secrets, your data, Tailscale's login, and the code checkout
+nas/.env
+nas/data/
+nas/tailscale/
+nas/code/
+# Fake library used by the local test
+test/library/
+test/data/

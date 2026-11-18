@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Next Watch</title><link rel="icon" href="/img/icon.svg"><link rel="stylesheet" href="/css/login.css"></head>
+<body>
+<main class="box">
+  <div class="brand">Next<span>Watch</span></div>
+  <p class="sub">Movie and TV recommendations for what's not on your NAS yet</p>
+  <form id="form">
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required autofocus>
+    <p class="msg" id="msg" role="alert"></p>
+    <button id="go">Sign in</button>
+  </form>
+</main>
+<script>
+const form = document.getElementById('form');
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const go = document.getElementById('go');
+  const msg = document.getElementById('msg');
+  go.disabled = true; msg.textContent = '';
+  try {
+    const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: document.getElementById('password').value }) });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) { location.href = '/'; return; }
+    msg.textContent = body.error || 'Something went wrong.';
+  } catch { msg.textContent = 'Could not reach the app.'; }
+  go.disabled = false;
+});
+</script>
+</body></html>
