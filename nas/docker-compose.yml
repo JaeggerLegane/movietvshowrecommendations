@@ -33,7 +33,7 @@ services:
     env_file: .env
     environment:
       GITHUB_TOKEN: "FILL-IN: the GitHub token (read-only, this repository only)"
-      REPO: "JaeggerLegane/next-watch"
+      REPO: "JaeggerLegane/movietvshowrecommendations"
       UPDATE_EVERY: "300"      # seconds between checks for a new version on GitHub
       DATA_DIR: /data
       MOVIES_DIR: /library/movies

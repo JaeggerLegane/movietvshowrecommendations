@@ -46,14 +46,14 @@ The first run takes about 5 minutes; after that everything is remembered (title 
 
 ## Run it on the Synology NAS (same setup as the promotion hunter and the family wishlist)
 
-The `nas` folder runs the app in Container Manager next to a small Tailscale container. Tailscale Funnel publishes it at `https://nextwatch.taila0166b.ts.net`. The NAS downloads the code from this private GitHub repository and checks it every 5 minutes: after a push, the NAS updates and restarts the app by itself.
+The `nas` folder runs the app in Container Manager next to a small Tailscale container. Tailscale Funnel publishes it at `https://nextwatch.<your-tailnet>.ts.net`. The NAS downloads the code from this private GitHub repository and checks it every 5 minutes: after a push, the NAS updates and restarts the app by itself.
 
 1. **Tailscale auth key**: login.tailscale.com/admin/settings/keys → *Generate auth key*. Copy it (starts with `tskey-auth-`).
-2. **GitHub token** (lets the NAS read this repository, nothing else): github.com → your picture → *Settings* → *Developer settings* → *Personal access tokens* → *Fine-grained tokens* → *Generate new token*. Name `NAS next-watch`, the longest expiration. Repository access: *Only select repositories* → `next-watch`. Permissions → *Contents*: **Read-only**. Copy the token.
+2. **GitHub token** (lets the NAS read this repository, nothing else): github.com → your picture → *Settings* → *Developer settings* → *Personal access tokens* → *Fine-grained tokens* → *Generate new token*. Name `NAS next watch`, the longest expiration. Repository access: *Only select repositories* → `next-watch`. Permissions → *Contents*: **Read-only**. Copy the token.
 3. **Folders**: in File Station open the shared folder `docker`, create `nextwatch/nas`, and inside `nas` the folders `code`, `data`, `tailscale` and `serve`.
 4. **Two files**: put `nas/serve/serve.json` from this repository in `serve`. Save `nas/.env.example` as `.env` in `docker/nextwatch/nas` and fill in the 2 lines that say FILL-IN (the Tailscale key and a password you choose).
 5. **Container Manager** → *Project* → *Create*: name `nextwatch`, path `docker/nextwatch/nas`, *Create docker-compose.yml*, paste the contents of `nas/docker-compose.yml`, and replace the `FILL-IN: ...` text after `GITHUB_TOKEN:` with the GitHub token (keep the quotes). If your `media` shared folder isn't on `volume1`, change the two `/volume1/media/...` lines. Skip the web portal step, then build and start.
-6. Open `https://nextwatch.taila0166b.ts.net` and sign in with your password. The first time, the address can take a few minutes to start working.
+6. Open `https://nextwatch.<your-tailnet>.ts.net` and sign in with your password. The first time, the address can take a few minutes to start working.
 7. The app asks for a **TMDB key** (free): make an account on themoviedb.org → *Settings* → *API* → request a key (*Developer*, personal use). Paste the long **API Read Access Token** in the app. It then builds your recommendations (about 5 minutes the first time; the page shows the progress).
 
 **Updates** arrive within 5 minutes of a push. To update right away: Container Manager → *Project* → `nextwatch` → *Action* → *Restart*. The Status page shows which version is running.
