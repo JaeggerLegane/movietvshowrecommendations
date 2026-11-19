@@ -1,5 +1,5 @@
 'use strict';
-// Next Watch: home with rows of posters, a page per title (like Plex), search and a status page.
+// Jaegger's Movie & TV Show recommendations: home with rows of posters, a page per title (like Plex), search and a status page.
 // Pages: #/ (home)  #/movie/123  #/tv/123  #/search/text  #/status
 
 const $ = (id) => document.getElementById(id);
@@ -34,7 +34,9 @@ function badge(i) {
   if (i.quality != null) return `<span class="badge tmdb"><b>TMDB</b>${Number(i.quality).toFixed(1)}</span>`;
   return '';
 }
+const monthYear = (date) => (date ? new Date(date).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '');
 function subline(i) {
+  if (i.newSeason) return `${i.newSeason} · ${monthYear(i.date)}`;
   const parts = [i.year];
   if (i.type === 'tv') parts.push(i.seasons ? plural(i.seasons, 'season') : 'TV show');
   else if (i.runtime) parts.push(runtime(i.runtime));
@@ -44,7 +46,7 @@ function posterImg(path, size, alt) {
   return path ? `<img loading="lazy" src="${IMG}${size}${esc(path)}" alt="${esc(alt || '')}">` : `<div class="noimg">${esc(alt || '')}</div>`;
 }
 function cardHtml(i, extraTag) {
-  const tag = extraTag || (i.owned ? '<span class="tag">On your NAS</span>' : '');
+  const tag = extraTag || (i.newSeason ? '<span class="tag new">New season</span>' : i.owned ? '<span class="tag">On your NAS</span>' : '');
   return `<a class="card" href="#/${i.type}/${i.id}" title="${esc(i.title)}"><div class="poster">${posterImg(i.poster, 'w342', i.title)}${badge(i)}${tag}</div><div class="cap"><b>${esc(i.title)}</b><span>${esc(subline(i))}</span></div></a>`;
 }
 const track = (inner) => `<div class="track-wrap"><button class="arrow left" aria-label="Scroll left" disabled>‹</button><div class="track">${inner}</div><button class="arrow right" aria-label="Scroll right">›</button></div>`;
@@ -85,9 +87,9 @@ $('types').addEventListener('click', (e) => {
   if (state.route !== 'home') location.hash = '#/'; else loadHome();
 });
 
-function renderChips(genres) {
-  const chip = (id, name, fav) => `<button class="chip${fav ? ' fav' : ''}" data-genre="${esc(id)}" aria-pressed="${state.genre === id}">${esc(name)}</button>`;
-  $('chips').innerHTML = chip('', 'All genres') + genres.filter((g) => g.fav).map((g) => chip(g.id, g.name, true)).join('') + genres.filter((g) => !g.fav).map((g) => chip(g.id, g.name)).join('');
+function renderChips(genres, year) {
+  const chip = (id, name, cls) => `<button class="chip${cls ? ` ${cls}` : ''}" data-genre="${esc(id)}" aria-pressed="${state.genre === id}">${esc(name)}</button>`;
+  $('chips').innerHTML = chip('', 'All genres') + (year ? chip('year', String(year), 'year') : '') + genres.filter((g) => g.fav).map((g) => chip(g.id, g.name, 'fav')).join('') + genres.filter((g) => !g.fav).map((g) => chip(g.id, g.name)).join('');
 }
 $('chips').addEventListener('click', (e) => {
   const b = e.target.closest('.chip');
@@ -161,7 +163,7 @@ function heroHtml(h) {
 
 function setupHtml(d) {
   const lib = d.library || {};
-  const found = lib.scannedAt ? `Next Watch found <b>${plural(lib.movies || 0, 'movie')}</b> and <b>${plural(lib.shows || 0, 'TV show')}</b> in your folders.` : 'Next Watch is reading your folders...';
+  const found = lib.scannedAt ? `The app found <b>${plural(lib.movies || 0, 'movie')}</b> and <b>${plural(lib.shows || 0, 'TV show')}</b> in your folders.` : 'Reading your folders...';
   return `<div class="center"><div class="panel">
     <h2>Almost there: add a free TMDB key</h2>
     <p>${found}</p>
@@ -191,7 +193,8 @@ async function loadHome() {
   let d;
   try { d = await api(`/api/home?type=${state.type}&genre=${encodeURIComponent(state.genre)}`); } catch (err) { box.innerHTML = `<div class="center"><p class="bad">${esc(err.message)}</p></div>`; return; }
   state.home = d; state.homeKey = key; state.builtAt = d.builtAt; setImageBase(d.imageBase);
-  renderChips(d.genres); showVersion(d.version); setPill(d.info.build);
+  if (state.genre && state.genre !== 'year' && !d.genres.some((g) => g.id === state.genre)) { state.genre = ''; save('genre', ''); state.homeKey = null; return loadHome(); }
+  renderChips(d.genres, d.year); showVersion(d.version); setPill(d.info.build);
   if (d.info.build.running) startPolling();
   $('chips').classList.toggle('off', !d.info.tmdb.configured);
 
@@ -201,7 +204,7 @@ async function loadHome() {
     const problem = d.info.tmdb.problem || d.info.build.error;
     box.innerHTML = problem
       ? `<div class="center"><div class="panel"><h2>Something went wrong</h2><p class="bad">${esc(problem)}</p><p><a class="btn small" href="#/status">Open the status page</a></p></div></div>`
-      : '<div class="center"><p class="empty">Nothing matches this filter yet. Try another genre, or All.</p></div>';
+      : `<div class="center"><p class="empty">${state.genre === 'year' ? `Nothing from ${d.year} that fits your rules yet.` : 'Nothing matches this filter yet. Try another genre, or All genres.'}</p></div>`;
     return;
   }
   box.innerHTML = (d.hero ? heroHtml(d.hero) : '<div style="height:20px"></div>') + `<div class="rows">${d.rows.map((r) => rowHtml(r.title, r.items)).join('')}</div>`;
@@ -249,12 +252,14 @@ async function showTitle(type, id) {
   try { t = await api(`/api/title/${type}/${id}`); } catch (err) { page.innerHTML = `<div class="center"><div class="panel"><p class="bad">${esc(err.message)}</p><button class="back" data-back>‹ Back</button></div></div>`; return; }
   if (state.route !== 'title') return;
   setImageBase(t.imageBase);
-  document.title = `${t.title} · Next Watch`;
+  document.title = `${t.title} · Jaegger's recommendations`;
   const year = (t.date || '').slice(0, 4);
   const length = t.type === 'tv' ? [t.numSeasons ? plural(t.numSeasons, 'season') : '', t.numEpisodes ? plural(t.numEpisodes, 'episode') : ''].filter(Boolean).join(' · ') : t.runtime ? runtime(t.runtime) : '';
   const status = t.type === 'tv' && t.status ? ({ 'Returning Series': 'Still running', Ended: 'Ended', Canceled: 'Cancelled', 'In Production': 'In production' }[t.status] || t.status) : '';
   let why;
-  if (t.owned) why = '<p class="why no">Already on your NAS</p>';
+  const missing = t.owned && t.localSeasons ? (t.seasons || []).filter((s) => !t.localSeasons.includes(s.n) && s.date && s.date <= new Date().toISOString().slice(0, 10)) : [];
+  if (t.owned && missing.length) why = `<p class="why">On your NAS: season ${esc(t.localSeasons.join(', '))}. Not on your NAS yet: ${esc(missing.map((s) => `season ${s.n} (${monthYear(s.date)})`).join(', '))}</p>`;
+  else if (t.owned) why = '<p class="why no">Already on your NAS</p>';
   else if (t.hidden) why = `<p class="why no">You marked this as not interested. <button class="btn small ghost" data-mark="hidden" data-key="${esc(t.key)}" aria-pressed="true">Show it again</button></p>`;
   else if (t.recommended) why = `<p class="why">${t.because.length ? `Because you have ${esc(list(t.because.slice(0, 3).map((b) => b.title)))}${t.because.length > 3 ? ` and ${t.because.length - 3} more` : ''}` : 'Picked for your favourite genres'}</p>`;
   else why = `<p class="why no">Not in your recommendations: ${esc(t.reason || 'not found by the last update')}</p>`;
@@ -268,7 +273,8 @@ async function showTitle(type, id) {
     t.collection && ['Part of', t.collection],
   ].filter(Boolean);
 
-  const seasons = (t.seasons || []).map((s) => `<div class="season"><div class="poster">${posterImg(s.poster || t.poster, 'w342', s.name)}</div><div class="cap"><b>${esc(s.name)}</b><span>${esc([plural(s.episodes || 0, 'episode'), (s.date || '').slice(0, 4)].filter(Boolean).join(' · '))}</span></div></div>`).join('');
+  const notOnNas = (s) => t.localSeasons && !t.localSeasons.includes(s.n) && s.date && s.date <= new Date().toISOString().slice(0, 10);
+  const seasons = (t.seasons || []).map((s) => `<div class="season"><div class="poster">${posterImg(s.poster || t.poster, 'w342', s.name)}${notOnNas(s) ? '<span class="tag new">Not on your NAS</span>' : ''}</div><div class="cap"><b>${esc(s.name)}</b><span>${esc([plural(s.episodes || 0, 'episode'), (s.date || '').slice(0, 4)].filter(Boolean).join(' · '))}</span></div></div>`).join('');
   const people = [...t.cast.map((c) => ({ ...c, sub: c.role })), ...t.crew.map((c) => ({ ...c, sub: c.job }))]
     .map((p) => `<div class="person"><div class="face">${p.photo ? `<img loading="lazy" src="${IMG}w185${esc(p.photo)}" alt="">` : esc(p.name.slice(0, 1))}</div><b>${esc(p.name)}</b><span>${esc(p.sub)}</span></div>`).join('');
 
@@ -334,7 +340,7 @@ async function showStatus() {
   let s;
   try { s = await api('/api/status'); } catch (err) { page.innerHTML = `<p class="empty bad">${esc(err.message)}</p>`; return; }
   if (state.route !== 'status') return;
-  document.title = 'Status · Next Watch';
+  document.title = "Status · Jaegger's recommendations";
   showVersion(s.version); setPill(s.build);
   if (s.build.running) startPolling();
   const L = s.library;
@@ -400,7 +406,7 @@ function route() {
   state.route = next;
   $('home').hidden = next !== 'home';
   $('page').hidden = next === 'home';
-  document.title = 'Next Watch';
+  document.title = "Jaegger's Movie & TV Show recommendations";
   if (next !== 'search' && $('q').value && next === 'home') $('q').value = '';
   if (next === 'home') {
     loadHome().then(() => { if (!leavingHome) window.scrollTo(0, state.homeScroll); });
@@ -412,5 +418,9 @@ function route() {
   else showStatus();
 }
 window.addEventListener('hashchange', route);
+const topBar = $('top');
+const setTopHeight = () => document.documentElement.style.setProperty('--top-h', `${topBar.offsetHeight}px`);
+if ('ResizeObserver' in window) new ResizeObserver(setTopHeight).observe(topBar); else window.addEventListener('resize', setTopHeight);
+setTopHeight();
 renderTypes();
 route();

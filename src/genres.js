@@ -17,14 +17,14 @@ const GENRES = [
   { id: 'adventure', name: 'Adventure', movie: [12], tv: [10759] },
   { id: 'comedy', name: 'Comedy', movie: [35], tv: [35] },
   { id: 'history', name: 'History', movie: [36], tv: [] },
-  { id: 'animation', name: 'Animation', movie: [16], tv: [16] },
   { id: 'documentary', name: 'Documentary', movie: [99], tv: [99] },
   { id: 'romance', name: 'Romance', movie: [10749], tv: [] },
-  { id: 'family', name: 'Family', movie: [10751], tv: [10751] },
-  { id: 'western', name: 'Western', movie: [37], tv: [37] },
   { id: 'music', name: 'Music', movie: [10402], tv: [] },
 ];
 const byId = new Map(GENRES.map((g) => [g.id, g]));
+
+/** Anime: Japanese animation (or tagged "anime" on TMDB). Shown only in the Anime tab. */
+const isAnime = (tmdbGenreIds = [], language = '', keywordNames = []) => tmdbGenreIds.includes(16) && (language === 'ja' || keywordNames.includes('anime'));
 
 // TV genres that are never recommended: News, Reality, Soap, Talk, Kids.
 const SKIP_TV_GENRES = new Set([10763, 10764, 10766, 10767, 10762]);
@@ -63,4 +63,4 @@ const DISCOVER_KEYWORDS = {
   horror: ['horror', 'supernatural horror', 'slasher', 'haunted house', 'folk horror', 'psychological horror'],
 };
 
-module.exports = { GENRES, byId, genresOf, SKIP_TV_GENRES, DISCOVER_KEYWORDS };
+module.exports = { GENRES, byId, genresOf, isAnime, SKIP_TV_GENRES, DISCOVER_KEYWORDS };

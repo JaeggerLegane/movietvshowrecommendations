@@ -36,6 +36,6 @@ module.exports = {
   minVotes: num(env.MIN_VOTES, 500), // an IMDb rating only counts with at least this many votes
 
   // How much is looked up. Higher = more choice, longer first build.
-  maxDetails: { movie: num(env.MAX_MOVIES, 2500), tv: num(env.MAX_SHOWS, 1500) },
+  maxDetails: { movie: num(env.MAX_MOVIES, 2500), tv: num(env.MAX_SHOWS, 1500), anime: num(env.MAX_ANIME, 800) },
   refreshEveryHours: num(env.REFRESH_EVERY_HOURS, 6),
 };

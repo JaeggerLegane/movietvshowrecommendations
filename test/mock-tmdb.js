@@ -36,10 +36,11 @@ for (let i = 1; i <= 1400; i += 1) {
     id, type, title: makeTitle(), date, genres, v, n: Math.floor(20 + rnd() * 20000), pop: rnd() * 100,
     keywords: [...new Set([pick(KW), pick(KW), pick(KW)])], imdb: `tt${String(9000000 + id)}`, imdbRating: Math.max(1, Math.min(9.6, Math.round((v + (rnd() - 0.5)) * 10) / 10)),
     imdbVotes: Math.floor(rnd() < 0.15 ? rnd() * 400 : 500 + rnd() * 400000), seasons: 1 + Math.floor(rnd() * 6), color: pick(COLORS),
+    lang: genres.includes(16) && rnd() < 0.7 ? 'ja' : 'en',
   });
 }
 const all = (type) => [...items[type].values()];
-const listItem = (x) => ({ id: x.id, [x.type === 'tv' ? 'name' : 'title']: x.title, [x.type === 'tv' ? 'first_air_date' : 'release_date']: x.date, genre_ids: x.genres, poster_path: `/p${x.id}.svg`, backdrop_path: `/b${x.id}.svg`, vote_average: x.v, vote_count: x.n, popularity: x.pop, overview: 'x', adult: false, media_type: x.type });
+const listItem = (x) => ({ id: x.id, [x.type === 'tv' ? 'name' : 'title']: x.title, [x.type === 'tv' ? 'first_air_date' : 'release_date']: x.date, genre_ids: x.genres, poster_path: `/p${x.id}.svg`, backdrop_path: `/b${x.id}.svg`, vote_average: x.v, vote_count: x.n, popularity: x.pop, overview: 'x', adult: false, media_type: x.type, original_language: x.lang });
 const norm = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/^(the|a|an) /, '').trim();
 
 // The fake NAS: about 60 movies and 20 shows, named in the different ways people name folders.
@@ -99,7 +100,8 @@ function details(x, params) {
     delete out.imdb_id;
     out.number_of_seasons = x.seasons; out.number_of_episodes = x.seasons * 10; out.status = 'Ended'; out.networks = [{ name: 'HBO' }];
     out.created_by = [{ name: `Creator ${x.id}`, profile_path: null }];
-    out.seasons = Array.from({ length: x.seasons }, (_, i) => ({ season_number: i + 1, name: `Season ${i + 1}`, episode_count: 10, poster_path: `/p${x.id}.svg`, air_date: x.date }));
+    out.seasons = Array.from({ length: x.seasons }, (_, i) => ({ season_number: i + 1, name: `Season ${i + 1}`, episode_count: 10, poster_path: `/p${x.id}.svg`, air_date: i === 0 ? x.date : `${Math.min(Number(x.date.slice(0, 4)) + i * 3, 2026)}-0${1 + (i % 9)}-10` }));
+    out.status = x.id % 2 ? 'Returning Series' : 'Ended';
   }
   if (!String(params.get('append_to_response') || '').includes('credits')) delete out.credits;
   return out;

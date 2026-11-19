@@ -9,13 +9,15 @@ const tmdb = require('./tmdb');
 const imdb = require('./imdb');
 const library = require('./library');
 const jsonfile = require('./jsonfile');
-const { GENRES, byId, genresOf, SKIP_TV_GENRES, DISCOVER_KEYWORDS } = require('./genres');
+const { GENRES, byId, genresOf, isAnime, SKIP_TV_GENRES, DISCOVER_KEYWORDS } = require('./genres');
 
 const DAY = 24 * 3600 * 1000;
 const TYPES = ['movie', 'tv'];
 const FAVOURITES = ['horror', 'detective', 'mafia', 'war', 'scifi'];
 const details = jsonfile.open('details.json', { items: {} });
 const lists = jsonfile.open('lists.json', { items: {}, keywords: {} });
+// Raise when the remembered TMDB lists need new fields (version 2: original language, to recognise anime).
+if (lists.data.version !== 2) { lists.data.items = {}; lists.data.version = 2; }
 const recs = jsonfile.open('recs.json', { builtAt: null, pool: [], owned: [], ratings: {}, stats: {} });
 const marks = jsonfile.open('marks.json', { hidden: [], watchlist: [] });
 
@@ -23,8 +25,9 @@ let poolMap = new Map(recs.data.pool.map((i) => [i.key, i]));
 const status = { running: false, step: null, done: 0, total: 0, startedAt: null, finishedAt: null, error: null, tmdbProblem: null };
 
 const today = () => new Date().toISOString().slice(0, 10);
+const thisYear = () => new Date().getFullYear();
 const yearOf = (date) => Number(String(date || '').slice(0, 4)) || null;
-const slim = (r) => ({ id: r.id, t: r.title || r.name, d: r.release_date || r.first_air_date || '', g: r.genre_ids || [], p: r.poster_path || null, b: r.backdrop_path || null, v: r.vote_average || 0, n: r.vote_count || 0, pop: r.popularity || 0, adult: Boolean(r.adult) });
+const slim = (r) => ({ id: r.id, t: r.title || r.name, d: r.release_date || r.first_air_date || '', g: r.genre_ids || [], p: r.poster_path || null, b: r.backdrop_path || null, v: r.vote_average || 0, n: r.vote_count || 0, pop: r.popularity || 0, lang: r.original_language || '', adult: Boolean(r.adult) });
 
 async function cachedList(key, maxAgeDays, fetcher) {
   const c = lists.data.items[key];
@@ -74,6 +77,9 @@ function discoverPlans(kw) {
     t('crime', { with_genres: 80 }, 6), t('crime', { with_genres: 80, ...best(500) }, 3),
     t('mafia', { with_keywords: kw.mafia }, 3), t('detective', { with_keywords: kw.detective }, 4), t('mystery', { with_genres: 9648 }, 4),
     t('top', best(1500), 5), t('new', { 'first_air_date.gte': yearAgo, 'vote_count.gte': 20 }, 3), t('popular', {}, 4),
+    m('year', { primary_release_year: thisYear(), 'vote_count.gte': 30 }, 5), t('year', { first_air_date_year: thisYear(), 'vote_count.gte': 10 }, 4),
+    m('anime', { with_genres: 16, with_original_language: 'ja' }, 4), m('anime', { with_genres: 16, with_original_language: 'ja', ...best(300) }, 3),
+    t('anime', { with_genres: 16, with_original_language: 'ja' }, 6), t('anime', { with_genres: 16, with_original_language: 'ja', ...best(300) }, 4),
   ].filter((p) => !('with_keywords' in p.params) || p.params.with_keywords);
 }
 
@@ -203,7 +209,7 @@ async function build() {
 
     const owned = library.owned();
     const ownedTitles = new Map();
-    for (const type of TYPES) for (const e of library.entries(type)) if (e.tmdb) ownedTitles.set(`${type}:${e.tmdb}`, { key: `${type}:${e.tmdb}`, type, id: e.tmdb, title: e.matched || e.title || e.name, year: e.matchedYear || e.year || null, mtime: e.mtime || 0, poster: e.poster || null });
+    for (const type of TYPES) for (const e of library.entries(type)) if (e.tmdb) ownedTitles.set(`${type}:${e.tmdb}`, { key: `${type}:${e.tmdb}`, type, id: e.tmdb, title: e.matched || e.title || e.name, year: e.matchedYear || e.year || null, mtime: e.mtime || 0, poster: e.poster || null, anime: library.isAnimeLibrary(e.lib), seasons: e.seasons || null });
 
     // Candidates: key -> { type, r, tags, because }
     const cands = new Map();
@@ -247,11 +253,13 @@ async function build() {
       const favs = genresOf(type, r.g, []).map((g) => (byId.get(g) || {}).fav || 0);
       const horror = type === 'movie' ? r.g.includes(27) : c.tags.has('horror');
       if (!horror && r.n > 200 && r.v < config.minImdb - 1) continue; // clearly too low, even allowing for TMDB vs IMDb differences
+      c.anime = (r.lang === 'ja' && r.g.includes(16)) || c.tags.has('anime');
       const preScore = Math.min(c.because.size, 8) * 3 + Math.max(0, ...favs) * 5 + (horror ? 3 : 0) + r.v * 0.8 + Math.log10(r.n + 1) + c.tags.size * 0.5;
       pre.push({ key, c, preScore });
     }
     const chosen = [];
-    for (const type of TYPES) chosen.push(...pre.filter((x) => x.c.type === type).sort((a, b) => b.preScore - a.preScore).slice(0, config.maxDetails[type]));
+    for (const type of TYPES) chosen.push(...pre.filter((x) => x.c.type === type && !x.c.anime).sort((a, b) => b.preScore - a.preScore).slice(0, config.maxDetails[type]));
+    chosen.push(...pre.filter((x) => x.c.anime).sort((a, b) => b.preScore - a.preScore).slice(0, config.maxDetails.anime));
 
     setStep('Looking up posters, seasons and cast');
     const found = new Map();
@@ -261,8 +269,23 @@ async function build() {
     });
     details.saveSoon(100);
 
+    setStep('Checking for new seasons of your shows');
+    const year = String(thisYear());
+    const newSeasons = [];
+    await inParallel([...ownedTitles.values()].filter((o) => o.type === 'tv' && o.seasons), async (o) => {
+      const cached = details.data.items[o.key];
+      const running = !cached || ['Returning Series', 'In Production', 'Planned'].includes(cached.status) || (cached.lastAir || '') >= String(thisYear() - 1);
+      const d = await getDetails('tv', o.id, running ? 3 : 30);
+      if (!d) return;
+      for (const season of d.seasons || []) {
+        if (!season.date || !season.date.startsWith(year) || season.date > today() || o.seasons.includes(season.n)) continue;
+        newSeasons.push({ o, d, season });
+      }
+    });
+    details.saveSoon(100);
+
     setStep('Reading IMDb ratings');
-    const ids = new Set([...found.values()].map(({ d }) => d.imdb).filter(Boolean));
+    const ids = new Set([...found.values(), ...newSeasons].map(({ d }) => d.imdb).filter(Boolean));
     const ratings = await imdb.ratingsFor(ids);
 
     setStep('Applying your rules');
@@ -278,6 +301,7 @@ async function build() {
         overview: d.overview.length > 420 ? `${d.overview.slice(0, 417).replace(/\s+\S*$/, '')}...` : d.overview,
         rating: j.rating, votes: j.votes, quality: j.score, source: j.source, tmdbRating: d.tmdbRating, genres: j.genres,
         cert: d.cert, runtime: d.runtime, seasons: d.numSeasons, because: because.map((o) => o.key), tags: [...c.tags],
+        anime: isAnime(d.tmdbGenres, d.language, d.keywords),
       };
       item.score = scoreOf(item, d);
       pool.push(item);
@@ -287,8 +311,22 @@ async function build() {
     const ratingMap = {};
     for (const [id, r] of ratings) ratingMap[id] = [r.rating, r.votes];
     const ownedList = [...ownedTitles.values()].sort((a, b) => b.mtime - a.mtime);
+    // One card per show, even when several seasons came out this year.
+    const byShow = new Map();
+    for (const n of newSeasons) { const g = byShow.get(n.o.key); if (g) g.list.push(n.season); else byShow.set(n.o.key, { ...n, list: [n.season] }); }
+    const seasonItems = [...byShow.values()].map((g) => {
+      g.list.sort((a, b) => a.n - b.n);
+      return { ...g, season: g.list[g.list.length - 1], label: g.list.length === 1 ? `Season ${g.list[0].n}` : `Seasons ${g.list.slice(0, -1).map((x) => x.n).join(', ')} & ${g.list[g.list.length - 1].n}` };
+    }).sort((a, b) => b.season.date.localeCompare(a.season.date)).map(({ o, d, season, label }) => {
+      const r = d.imdb ? ratings.get(d.imdb) : null;
+      return {
+        key: o.key, type: 'tv', id: d.id, title: d.title, year: yearOf(d.date), date: season.date, poster: season.poster || d.poster, backdrop: d.backdrop,
+        overview: d.overview, rating: r ? r.rating : null, votes: r ? r.votes : 0, quality: null, source: r ? 'imdb' : null, genres: genresOf('tv', d.tmdbGenres, d.keywords),
+        cert: d.cert, seasons: d.numSeasons, newSeason: label, episodes: season.episodes, anime: o.anime || isAnime(d.tmdbGenres, d.language, d.keywords), because: [], score: 0,
+      };
+    });
     recs.replace({
-      builtAt: new Date().toISOString(), seconds: Math.round((Date.now() - started) / 1000), pool, owned: ownedList, ratings: ratingMap,
+      builtAt: new Date().toISOString(), seconds: Math.round((Date.now() - started) / 1000), pool, owned: ownedList, ratings: ratingMap, newSeasons: seasonItems,
       stats: { candidates: cands.size, preselected: pre.length, detailed: found.size, kept: pool.length, rejected },
     });
     recs.save();
@@ -304,29 +342,35 @@ async function build() {
 
 // ---------- What the pages ask for ----------
 
-const card = (i) => ({ key: i.key, type: i.type, id: i.id, title: i.title, year: i.year, poster: i.poster, rating: i.rating, source: i.source, quality: i.quality, seasons: i.seasons, runtime: i.runtime, horror: i.genres.includes('horror') });
+const card = (i) => ({ key: i.key, type: i.type, id: i.id, title: i.title, year: i.year, poster: i.poster, rating: i.rating, source: i.source, quality: i.quality, seasons: i.seasons, runtime: i.runtime, horror: i.genres.includes('horror'), newSeason: i.newSeason, date: i.newSeason ? i.date : undefined });
 const ownedByKey = () => new Map((recs.data.owned || []).map((o) => [o.key, o]));
 const dayNumber = () => Math.floor((Date.now() + 3600 * 1000) / DAY);
 function rotate(arr, n) { if (!arr.length) return arr; const s = n % arr.length; return arr.slice(s).concat(arr.slice(0, s)); }
 
 function home({ type = 'all', genre = '' } = {}) {
   const hidden = new Set(marks.data.hidden);
-  const fits = (i) => !hidden.has(i.key) && (type === 'all' || i.type === type) && (!genre || i.genres.includes(genre));
+  const year = thisYear();
+  const yearMode = genre === 'year'; // the "2026" chip: only what came out this year
+  // Anime only in the Anime tab; never in All, Movies or TV shows.
+  const typeFits = (i) => (type === 'anime' ? Boolean(i.anime) : !i.anime && (type === 'all' || i.type === type));
+  const genreFits = (i) => (yearMode ? i.year === year : !genre || i.genres.includes(genre));
+  const fits = (i) => !hidden.has(i.key) && typeFits(i) && genreFits(i);
   const pool = recs.data.pool.filter(fits); // already sorted by score
   const owned = ownedByKey();
   const rows = [];
   const used = new Set();
   const row = (id, title, items, min = 5) => { if (items.length >= min) rows.push({ id, title, items: items.slice(0, 40).map(card) }); };
-  const genreName = genre && byId.get(genre) ? byId.get(genre).name : '';
+  const genreName = !yearMode && genre && byId.get(genre) ? byId.get(genre).name : '';
 
   const watch = marks.data.watchlist.map((k) => poolMap.get(k)).filter((i) => i && fits(i));
   row('mylist', 'My list', watch, 1);
-  row('top', genreName ? `Top ${genreName} picks for you` : 'Top picks for you', pool);
+  if (yearMode) row('newseasons', 'New seasons of shows you have', (recs.data.newSeasons || []).filter(typeFits), 1);
+  row('top', yearMode ? `New in ${year} for you` : genreName ? `Top ${genreName} picks for you` : 'Top picks for you', pool);
 
   // "Because you added X": the newest titles in your folders that have enough recommendations.
   const recCount = new Map();
   for (const i of pool) for (const k of i.because) recCount.set(k, (recCount.get(k) || 0) + 1);
-  const ownedFits = (o) => (type === 'all' || o.type === type) && (recCount.get(o.key) || 0) >= 5;
+  const ownedFits = (o) => typeFits(o) && (recCount.get(o.key) || 0) >= 5;
   for (const o of (recs.data.owned || []).filter(ownedFits).slice(0, 3)) {
     used.add(o.key);
     row(`because-${o.key}`, `Because you recently added ${o.title}`, pool.filter((i) => i.because.includes(o.key)));
@@ -335,12 +379,12 @@ function home({ type = 'all', genre = '' } = {}) {
   for (const id of FAVOURITES) if (id !== genre) row(id, byId.get(id).name, pool.filter((i) => i.genres.includes(id)));
 
   const yearAgo = new Date(Date.now() - 365 * DAY).toISOString().slice(0, 10);
-  row('new', 'New releases', pool.filter((i) => i.date >= yearAgo));
+  if (!yearMode) row('new', 'New releases', pool.filter((i) => i.date >= yearAgo));
   row('imdb', 'Highest rated on IMDb', pool.filter((i) => i.source === 'imdb' && i.votes >= 25000).sort((a, b) => b.rating - a.rating));
   row('gems', 'Hidden gems', pool.filter((i) => i.source === 'imdb' && i.rating >= 7.3 && i.votes < 25000).sort((a, b) => b.rating - a.rating));
 
   // "Because you have X": a few other titles you own, different every day.
-  const others = [...recCount.entries()].filter(([k, n]) => n >= 6 && !used.has(k) && owned.has(k)).sort((a, b) => b[1] - a[1]).slice(0, 40).map(([k]) => owned.get(k));
+  const others = [...recCount.entries()].filter(([k, n]) => n >= 6 && !used.has(k) && owned.has(k) && typeFits(owned.get(k))).sort((a, b) => b[1] - a[1]).slice(0, 40).map(([k]) => owned.get(k));
   for (const o of rotate(others, dayNumber() * 3).slice(0, 3)) row(`have-${o.key}`, `Because you have ${o.title}`, pool.filter((i) => i.because.includes(o.key)));
 
   const rest = GENRES.filter((g) => !FAVOURITES.includes(g.id) && g.id !== genre)
@@ -352,7 +396,7 @@ function home({ type = 'all', genre = '' } = {}) {
   const h = heroes.length ? heroes[dayNumber() % heroes.length] : null;
   const hero = h && { ...card(h), backdrop: h.backdrop, overview: h.overview, genres: h.genres.map((g) => byId.get(g).name), cert: h.cert, because: h.because.map((k) => (owned.get(k) || {}).title).filter(Boolean).slice(0, 2) };
 
-  return { hero, rows, total: pool.length, builtAt: recs.data.builtAt };
+  return { hero, rows, total: pool.length, builtAt: recs.data.builtAt, year };
 }
 
 async function title(type, id) {
@@ -377,6 +421,7 @@ async function title(type, id) {
     ...d, key, genres: j.genres.map((g) => byId.get(g).name), rating: j.rating, votes: j.votes, quality: j.score ?? null, source: j.source || null,
     recommended: Boolean(item), reason: j.ok ? null : j.reason, owned: Boolean(j.owned), because, more,
     hidden: marks.data.hidden.includes(key), inList: marks.data.watchlist.includes(key),
+    localSeasons: j.owned && type === 'tv' ? library.seasonsOf(id) : null,
   };
 }
 

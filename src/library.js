@@ -92,6 +92,26 @@ async function listMovies(dir, problems) {
   return out;
 }
 
+const seasonOfFile = (name) => { const m = /\bs(\d{1,2})\s?e\d{1,3}\b/i.exec(name) || /\b(\d{1,2})x\d{2}\b/.exec(name); return m ? Number(m[1]) : null; };
+
+/** Which seasons of a show are on the NAS: from "Season 02" / "S02" folders, or from S02E05 in file names. Null when it can't tell. */
+async function localSeasons(dir) {
+  const inside = await readdir(dir);
+  if (inside.error) return null;
+  const found = new Set();
+  for (const x of inside) {
+    if (x.isDirectory()) {
+      const m = /^(?:season|series|saison|seizoen|staffel|s)[\s._-]*(\d{1,3})\b/i.exec(x.name) || /[\s._-]s(\d{1,2})(?:[\s._-]|$)/i.exec(x.name);
+      if (m) { found.add(Number(m[1])); continue; }
+    } else if (x.isFile() && VIDEO.test(x.name)) {
+      const n = seasonOfFile(x.name);
+      if (n !== null) found.add(n);
+    }
+  }
+  found.delete(0); // specials
+  return found.size ? [...found].sort((a, b) => a - b) : null;
+}
+
 /** Every show in the TV folder: one per sub-folder (loose episode files are grouped by show name). */
 async function listShows(dir, problems) {
   const out = [];
@@ -101,12 +121,15 @@ async function listShows(dir, problems) {
   for (const e of top) {
     if (SKIP.test(e.name)) continue;
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) out.push({ name: e.name, mtime: await mtimeOf(full) });
+    if (e.isDirectory()) out.push({ name: e.name, mtime: await mtimeOf(full), seasons: await localSeasons(full) });
     else if (e.isFile() && VIDEO.test(e.name)) {
       const show = parseName(e.name, 'tv').title;
-      if (!loose.has(show)) loose.set(show, { name: show, mtime: await mtimeOf(full) });
+      if (!loose.has(show)) loose.set(show, { name: show, mtime: await mtimeOf(full), seasons: [] });
+      const n = seasonOfFile(e.name);
+      if (n && !loose.get(show).seasons.includes(n)) loose.get(show).seasons.push(n);
     }
   }
+  for (const l of loose.values()) l.seasons = l.seasons.length ? l.seasons.sort((a, b) => a - b) : null;
   return out.concat([...loose.values()]);
 }
 
@@ -123,7 +146,7 @@ async function listMixed(dir, lib, depth = 0) {
     const full = path.join(dir, e.name);
     if (e.isFile()) {
       if (!VIDEO.test(e.name) || /\bsample\b/i.test(e.name)) continue;
-      if (EPISODE.test(e.name)) out.push({ type: 'tv', name: parseName(e.name, 'tv').title, mtime: await mtimeOf(full), lib, loose: true });
+      if (EPISODE.test(e.name)) out.push({ type: 'tv', name: parseName(e.name, 'tv').title, mtime: await mtimeOf(full), lib, loose: true, seasons: seasonOfFile(e.name) ? [seasonOfFile(e.name)] : null });
       else out.push({ type: 'movie', name: e.name, mtime: await mtimeOf(full), lib });
       continue;
     }
@@ -132,13 +155,19 @@ async function listMixed(dir, lib, depth = 0) {
     if (inside.error) continue;
     const videos = inside.filter((x) => x.isFile() && VIDEO.test(x.name) && !/\bsample\b/i.test(x.name));
     const isShow = inside.some((x) => x.isDirectory() && SEASON_DIR.test(x.name)) || videos.filter((x) => EPISODE.test(x.name)).length >= 2 || videos.length >= 4;
-    if (isShow) out.push({ type: 'tv', name: e.name, mtime: await mtimeOf(full), lib });
+    if (isShow) out.push({ type: 'tv', name: e.name, mtime: await mtimeOf(full), lib, seasons: await localSeasons(full) });
     else if (isVideoDir(inside)) out.push({ type: 'movie', name: e.name, mtime: await mtimeOf(full), lib });
     else if (depth === 0) out.push(...(await listMixed(full, `${lib}/${e.name}`, 1))); // a collection folder
   }
   // Loose episode files of the same show count once.
   const seen = new Set();
-  return out.filter((x) => { if (!x.loose) return true; const k = `${x.lib}|${x.name}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  const merged = new Map();
+  return out.filter((x) => {
+    if (!x.loose) return true;
+    const k = `${x.lib}|${x.name}`;
+    if (seen.has(k)) { const first = merged.get(k); for (const n of x.seasons || []) if (!(first.seasons || []).includes(n)) first.seasons = [...(first.seasons || []), n].sort((a, b) => a - b); return false; }
+    seen.add(k); merged.set(k, x); return true;
+  });
 }
 
 /** The other libraries next to the movies and TV folders (only when the whole libraries folder is shared with the app). */
@@ -230,12 +259,12 @@ async function scan(match = true) {
     const next = {};
     for (const e of lists[type]) {
       const key = e.folder ? `${e.folder}/${e.name}` : e.name;
-      next[key] = { ...(s[type][key] || {}), name: e.name, mtime: e.mtime };
+      next[key] = { ...(s[type][key] || {}), name: e.name, mtime: e.mtime, seasons: e.seasons || null };
     }
     for (const { lib, items } of others) {
       for (const e of items.filter((x) => x.type === type)) {
         const key = `${e.lib}/${e.name}`;
-        next[key] = { ...(s[type][key] || {}), name: e.name, mtime: e.mtime, lib };
+        next[key] = { ...(s[type][key] || {}), name: e.name, mtime: e.mtime, lib, seasons: e.seasons || null };
       }
     }
     s[type] = next;
@@ -295,6 +324,14 @@ function owned() {
   return { ids, has, series };
 }
 
+/** Seasons on the NAS of a show you have (null when unknown or not yours). */
+function seasonsOf(id) {
+  const e = entries('tv').find((x) => x.tmdb === Number(id));
+  return e ? e.seasons || null : null;
+}
+
+const isAnimeLibrary = (lib) => /anime|manga/i.test(lib || '');
+
 function summary() {
   const s = store.data;
   const count = (type) => {
@@ -304,4 +341,4 @@ function summary() {
   return { scannedAt: s.scannedAt, problems: s.problems, movie: count('movie'), tv: count('tv'), dirs: { movie: config.moviesDir, tv: config.tvDir }, libraries: s.libraries || [] };
 }
 
-module.exports = { scan, entries, owned, summary, parseName, norm, seriesName, listMixed, getProgress };
+module.exports = { scan, entries, owned, summary, parseName, norm, seriesName, listMixed, localSeasons, seasonsOf, isAnimeLibrary, getProgress };

@@ -1,9 +1,10 @@
-# Next Watch
+# Jaegger's Movie & TV Show recommendations
 
-Netflix-style recommendations for movies and TV shows that are **not on your NAS yet**.
+(Code name *Next Watch*.) Netflix-style recommendations for movies and TV shows that are **not on your NAS yet**.
 
 - **Home**: rows of posters like Netflix and Plex: *Top picks for you*, *Because you recently added …*, one row per favourite (Horror, Detective, Mafia & drugs, War, Sci-Fi), *New releases*, *Highest rated on IMDb*, *Hidden gems*, *Because you have …* and a row per other genre.
-- **Filters**: All / Movies / TV shows at the top, and genre chips below it (★ = your favourites).
+- **Tabs**: All / Movies / TV shows / Anime. Anime (Japanese animation) only appears in the Anime tab, never in the others.
+- **Genre chips** (★ = your favourites). The first chip is the current year (**2026**): only what came out this year, plus *New seasons of shows you have* — shows on your NAS with a season that aired this year and isn't in your folders yet (read from the `Season 03` folders or `S03E01` file names).
 - **Title page** (like Plex): poster, description, content rating, IMDb and TMDB scores, runtime or seasons and episodes, seasons with posters, cast & crew, trailer, links to IMDb and TMDB, and *why* it is recommended ("Because you have Sicario and Narcos").
 - **My list** and **Not interested** on every title. Hidden titles can be brought back on the Status page.
 - **Search** finds titles in your recommendations, and other titles with the reason they're left out (already on the NAS, too old, rated too low, ...).

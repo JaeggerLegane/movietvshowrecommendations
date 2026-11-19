@@ -59,7 +59,7 @@ const version = { id: process.env.APP_VERSION || 'dev', title: process.env.APP_V
 const fail = (res, err) => { console.error(err); res.status(err.status === 401 ? 502 : 500).json({ error: err.status === 401 ? 'TMDB refused the key. Check TMDB_API_KEY.' : err.message }); };
 
 app.get('/api/home', (req, res) => {
-  const type = ['movie', 'tv'].includes(req.query.type) ? req.query.type : 'all';
+  const type = ['movie', 'tv', 'anime'].includes(req.query.type) ? req.query.type : 'all';
   const genre = String(req.query.genre || '');
   const lib = require('./src/library').summary();
   const library = { scannedAt: lib.scannedAt, problems: lib.problems, movies: lib.movie.total, shows: lib.tv.total };
@@ -108,7 +108,7 @@ app.post('/api/rebuild', (req, res) => {
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
 const server = app.listen(config.port, () => {
-  console.log(`Next Watch is running on http://localhost:${config.port}`);
+  console.log(`Jaegger's Movie & TV Show recommendations is running on http://localhost:${config.port}`);
   if (!config.password && !config.noLogin) console.log('No APP_PASSWORD set: nobody can sign in until it is filled in.');
 });
 
