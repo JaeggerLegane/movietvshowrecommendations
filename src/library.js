@@ -10,7 +10,12 @@ const VIDEO = /\.(mkv|mp4|avi|m4v|mov|wmv|ts|m2ts|mpe?g|iso|webm|flv|divx|vob|rm
 const SKIP = /^(\.|@|#)|^(extras?|featurettes?|behind the scenes|deleted scenes|trailers?|samples?|subs?|subtitles|specials|interviews|shorts|other|lost\+found|\$recycle\.bin|system volume information)$/i;
 const JUNK = /\b(2160p|1080p|1080i|720p|576p|480p|4k|uhd|hdr10?|dv|dolby ?vision|bluray|blu-ray|bdrip|brrip|bdremux|remux|webrip|web-?dl|web|hdtv|dvdrip|dvdscr|hdrip|xvid|divx|x264|x265|h ?264|h ?265|hevc|avc|aac|ac3|dts|ddp?5 ?1|atmos|truehd|10bit|proper|repack|extended|unrated|directors cut|remastered|imax|multi|dual|subbed|dubbed|complete|internal|limited)\b/i;
 
-const store = jsonfile.open('library.json', { movie: {}, tv: {}, scannedAt: null, problems: [] });
+// Edition words after a title, outside brackets: "Aliens DC (1986)", "Blade Runner Final Cut".
+const EDITION = /\s+(dc|director['’]?s? cut|extended( edition| cut| version)?|unrated( cut| edition)?|uncut|theatrical( cut| version| edition)?|final cut|ultimate( cut| edition)?|special edition|collectors edition|anniversary edition|\d+(th)? anniversary( edition)?|remastered|restored|imax( edition)?|redux|criterion( collection)?|open matte|coda cut|black and white edition|chrome edition|noir edition|complete series)$/i;
+// Raise this when the way names are read changes: every folder is then matched again.
+const PARSER_VERSION = 2;
+
+const store = jsonfile.open('library.json', { movie: {}, tv: {}, scannedAt: null, problems: [], libraries: [] });
 
 /** Plain text used to compare titles: lower case, no accents or punctuation. */
 function norm(title) {
@@ -43,6 +48,12 @@ function parseName(raw, type) {
     if (pick) { year = Number(pick[1]); title = s.slice(0, pick.index); } else if (junk) title = s.slice(0, junk.index);
   }
   title = title.replace(JUNK, ' ').replace(/[\s\-–:,(]+$/g, '').replace(/^[\s\-–]+/, '').replace(/\s+/g, ' ').trim();
+  // Strip edition words, unless nothing real would be left ("The Final Cut" stays "The Final Cut").
+  for (let i = 0; i < 3 && EDITION.test(title); i += 1) {
+    const rest = title.replace(EDITION, '').replace(/[\s\-–:,]+$/, '').trim();
+    if (['', 'the', 'a', 'an'].includes(rest.toLowerCase())) break;
+    title = rest;
+  }
   if (year && (year < 1900 || year > new Date().getFullYear() + 2)) year = null;
   return { title: title || s, year, ids };
 }
@@ -99,6 +110,53 @@ async function listShows(dir, problems) {
   return out.concat([...loose.values()]);
 }
 
+const EPISODE = /\bs\d{1,2}\s?e\d{1,3}\b|\b\d{1,2}x\d{2}\b|\bepisode\b|\bep\s?\d+|\s-\s(?!(19|20)\d{2}\b)\d{2,4}\b/i;
+const SEASON_DIR = /^(season|series|saison|seizoen|staffel|s)\s*\d+|^specials$/i;
+
+/** A library that mixes movies and shows (anime, Korean, biographies...): a folder with seasons or episodes is a show. */
+async function listMixed(dir, lib, depth = 0) {
+  const out = [];
+  const top = await readdir(dir);
+  if (top.error) return out;
+  for (const e of top) {
+    if (SKIP.test(e.name)) continue;
+    const full = path.join(dir, e.name);
+    if (e.isFile()) {
+      if (!VIDEO.test(e.name) || /\bsample\b/i.test(e.name)) continue;
+      if (EPISODE.test(e.name)) out.push({ type: 'tv', name: parseName(e.name, 'tv').title, mtime: await mtimeOf(full), lib, loose: true });
+      else out.push({ type: 'movie', name: e.name, mtime: await mtimeOf(full), lib });
+      continue;
+    }
+    if (!e.isDirectory()) continue;
+    const inside = await readdir(full);
+    if (inside.error) continue;
+    const videos = inside.filter((x) => x.isFile() && VIDEO.test(x.name) && !/\bsample\b/i.test(x.name));
+    const isShow = inside.some((x) => x.isDirectory() && SEASON_DIR.test(x.name)) || videos.filter((x) => EPISODE.test(x.name)).length >= 2 || videos.length >= 4;
+    if (isShow) out.push({ type: 'tv', name: e.name, mtime: await mtimeOf(full), lib });
+    else if (isVideoDir(inside)) out.push({ type: 'movie', name: e.name, mtime: await mtimeOf(full), lib });
+    else if (depth === 0) out.push(...(await listMixed(full, `${lib}/${e.name}`, 1))); // a collection folder
+  }
+  // Loose episode files of the same show count once.
+  const seen = new Set();
+  return out.filter((x) => { if (!x.loose) return true; const k = `${x.lib}|${x.name}`; if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+/** The other libraries next to the movies and TV folders (only when the whole libraries folder is shared with the app). */
+async function listOtherLibraries() {
+  const root = config.libraryRoot;
+  const top = await readdir(root);
+  if (top.error) return [];
+  const main = new Set([path.resolve(config.moviesDir), path.resolve(config.tvDir)]);
+  const out = [];
+  for (const e of top) {
+    if (!e.isDirectory() || SKIP.test(e.name) || config.ignoreLibraries.test(e.name)) continue;
+    const full = path.join(root, e.name);
+    if (main.has(path.resolve(full))) continue;
+    out.push({ lib: e.name, items: await listMixed(full, e.name) });
+  }
+  return out;
+}
+
 function bestMatch(results, wanted, type) {
   if (!results || !results.length) return null;
   const want = norm(wanted.title);
@@ -134,6 +192,15 @@ async function matchOne(type, entry) {
       r = await tmdb.get(`/search/${type}`, { query: p.title, include_adult: false });
       found = bestMatch(r && r.results, p, type);
     }
+    // Last try: drop the last word, but only accept an exact title from the same year.
+    const words = p.title.split(' ');
+    if (!found && p.year && words.length >= 2) {
+      const shorter = { ...p, title: words.slice(0, -1).join(' ') };
+      r = await tmdb.get(`/search/${type}`, { query: shorter.title, [yearKey]: p.year, include_adult: false });
+      const hit = bestMatch(r && r.results, shorter, type);
+      const year = hit && Number(String(hit.release_date || hit.first_air_date || '').slice(0, 4));
+      if (hit && [hit.title, hit.name].filter(Boolean).map(norm).includes(norm(shorter.title)) && Math.abs(year - p.year) <= 1) found = hit;
+    }
   }
   entry.tried = Date.now();
   if (found) {
@@ -151,7 +218,13 @@ const getProgress = () => progress;
 async function scan(match = true) {
   const problems = [];
   const lists = { movie: await listMovies(config.moviesDir, problems), tv: await listShows(config.tvDir, problems) };
+  const others = await listOtherLibraries();
   const s = store.data;
+  if (s.parserVersion !== PARSER_VERSION) {
+    for (const type of ['movie', 'tv']) for (const e of Object.values(s[type])) { delete e.tmdb; delete e.tried; delete e.matched; delete e.matchedYear; delete e.poster; }
+    s.parserVersion = PARSER_VERSION;
+  }
+  const libs = [{ name: path.basename(config.moviesDir), movie: (lists.movie || []).length, tv: 0 }, { name: path.basename(config.tvDir), movie: 0, tv: (lists.tv || []).length }];
   for (const type of ['movie', 'tv']) {
     if (!lists[type]) continue; // folder unreachable: keep what we knew
     const next = {};
@@ -159,8 +232,16 @@ async function scan(match = true) {
       const key = e.folder ? `${e.folder}/${e.name}` : e.name;
       next[key] = { ...(s[type][key] || {}), name: e.name, mtime: e.mtime };
     }
+    for (const { lib, items } of others) {
+      for (const e of items.filter((x) => x.type === type)) {
+        const key = `${e.lib}/${e.name}`;
+        next[key] = { ...(s[type][key] || {}), name: e.name, mtime: e.mtime, lib };
+      }
+    }
     s[type] = next;
   }
+  for (const { lib, items } of others) libs.push({ name: lib, movie: items.filter((x) => x.type === 'movie').length, tv: items.filter((x) => x.type === 'tv').length });
+  s.libraries = libs;
   s.scannedAt = new Date().toISOString();
   s.problems = problems;
   store.saveSoon(100);
@@ -188,31 +269,39 @@ async function scan(match = true) {
 function entries(type) { return Object.values(store.data[type] || {}); }
 
 /** What you already have: TMDB ids, plus title+year of folders that could not be matched. */
+/** "Kill Bill: Vol. 1" -> "kill bill", "The Godfather Part III" -> "godfather": the name of the series a movie belongs to. */
+function seriesName(title) {
+  return norm(String(title || '').split(/[:–—(]|\s-\s/)[0])
+    .replace(/\s+(vol|volume|part|chapter|episode|book)\s*[\divxlc]+$/, '').replace(/\s+([\d]+|[ivx]+)$/, '').trim();
+}
+
 function owned() {
   const ids = { movie: new Set(), tv: new Set() };
   const titles = new Set();
+  const series = new Set();
   for (const type of ['movie', 'tv']) {
     for (const e of entries(type)) {
       if (e.tmdb) ids[type].add(e.tmdb);
       const p = parseName(e.name, type);
       titles.add(`${type}:${norm(p.title)}:${p.year || ''}`);
       if (e.matched) titles.add(`${type}:${norm(e.matched)}:${e.matchedYear || ''}`);
+      if (type === 'movie') for (const t of [p.title, e.matched]) { const n = seriesName(t); if (n.length >= 3) series.add(n); }
     }
   }
   const has = (type, title, year) => {
     const k = `${type}:${norm(title)}:`;
     return titles.has(k) || (year && (titles.has(k + year) || titles.has(k + (year - 1)) || titles.has(k + (year + 1))));
   };
-  return { ids, has };
+  return { ids, has, series };
 }
 
 function summary() {
   const s = store.data;
   const count = (type) => {
     const list = entries(type);
-    return { total: list.length, matched: list.filter((e) => e.tmdb).length, unmatched: list.filter((e) => !e.tmdb).map((e) => e.name).sort() };
+    return { total: list.length, matched: list.filter((e) => e.tmdb).length, unmatched: list.filter((e) => !e.tmdb).map((e) => (e.lib ? `${e.lib}: ${e.name}` : e.name)).sort() };
   };
-  return { scannedAt: s.scannedAt, problems: s.problems, movie: count('movie'), tv: count('tv'), dirs: { movie: config.moviesDir, tv: config.tvDir } };
+  return { scannedAt: s.scannedAt, problems: s.problems, movie: count('movie'), tv: count('tv'), dirs: { movie: config.moviesDir, tv: config.tvDir }, libraries: s.libraries || [] };
 }
 
-module.exports = { scan, entries, owned, summary, parseName, norm, getProgress };
+module.exports = { scan, entries, owned, summary, parseName, norm, seriesName, listMixed, getProgress };

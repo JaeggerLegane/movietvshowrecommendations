@@ -9,4 +9,4 @@ nas/tailscale/
 nas/code/
 # Fake library used by the local test
 test/library/
-test/data/
+test/data*/

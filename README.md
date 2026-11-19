@@ -16,14 +16,14 @@ Netflix-style recommendations for movies and TV shows that are **not on your NAS
 | Released in 1970 or later | `MIN_YEAR=1970` |
 | IMDb rating 6 or higher, except horror (horror is always allowed) | `MIN_IMDB=6` |
 | An IMDb rating counts from 500 votes. Titles from the last 6 months that have no IMDb rating yet use the TMDB score instead | `MIN_VOTES=500` |
-| Not already on the NAS | — |
+| Not already on the NAS (any library: movies, tv, anime, biographies, ...), including re-edits of movies you have such as *The Godfather Trilogy: 1901-1980* | — |
 | Favourites rank higher: horror, detective, mafia & drug crime, war, sci-fi | `src/genres.js` |
 
 TV reality, talk shows, news, soaps and kids' shows are never recommended.
 
 ## How it works
 
-1. Every 6 hours it reads `\\jaeggerlegane\media\libraries\movies` and `\\...\tv` (read-only) and matches each folder name to a TMDB title. Names like `Heat (1995)`, `Heat.1995.1080p.BluRay.x264`, `Heat (1995) {tmdb-949}` and collection folders all work.
+1. Every 6 hours it reads `\\jaeggerlegane\media\libraries` (read-only): `movies`, `tv`, and every other library next to them (anime, biographies, Korean, ...). In those other libraries a folder with seasons or episodes counts as a show, anything else as a movie; photo and home-video folders are skipped. Each folder name is matched to a TMDB title. Names like `Heat (1995)`, `Heat.1995.1080p.BluRay.x264`, `Aliens DC (1986) [1080p]`, `Heat (1995) {tmdb-949}` and collection folders all work. The Status page lists the folders that could not be recognised.
 2. It collects candidates from TMDB: "people who liked *this title you have* also liked …" for every title on your NAS, plus the best and most popular titles in your favourite genres.
 3. It looks up the details of the best ~2,500 movies and ~1,500 shows (poster, seasons, cast) and their IMDb ratings. Ratings come from IMDb's free daily download (datasets.imdbws.com, personal use).
 4. It applies your rules, scores what's left (IMDb rating + favourite genres + how many of your titles point to it + recent), and saves the result.
@@ -55,6 +55,8 @@ The `nas` folder runs the app in Container Manager next to a small Tailscale con
 5. **Container Manager** → *Project* → *Create*: name `nextwatch`, path `docker/nextwatch/nas`, *Create docker-compose.yml*, paste the contents of `nas/docker-compose.yml`, and replace the `FILL-IN: ...` text after `GITHUB_TOKEN:` with the GitHub token (keep the quotes). If your `media` shared folder isn't on `volume1`, change the two `/volume1/media/...` lines. Skip the web portal step, then build and start.
 6. Open `https://nextwatch.<your-tailnet>.ts.net` and sign in with your password. The first time, the address can take a few minutes to start working.
 7. The app asks for a **TMDB key** (free): make an account on themoviedb.org → *Settings* → *API* → request a key (*Developer*, personal use). Paste the long **API Read Access Token** in the app. It then builds your recommendations (about 5 minutes the first time; the page shows the progress).
+
+**Your other libraries** (anime, biographies, ...). The app counts everything in `\\jaeggerlegane\media\libraries` as yours, so it needs the whole folder. Projects made before 19 November 2026 only share `movies` and `tv`. To change that once: Container Manager → *Project* → `nextwatch` → *Action* → *Stop*. Open the project's YAML and replace the two lines that start with `- /volume1/media/libraries/` with this one line (same indentation): `- /volume1/media/libraries:/library:ro`. Save, then *Action* → *Build*. The Status page then lists every library it read. To leave a library out, add `IGNORE_LIBRARIES=Fights,Concerts` (folder names) to `.env`.
 
 **Updates** arrive within 5 minutes of a push. To update right away: Container Manager → *Project* → `nextwatch` → *Action* → *Restart*. The Status page shows which version is running.
 

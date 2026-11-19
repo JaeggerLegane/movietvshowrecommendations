@@ -17,6 +17,10 @@ module.exports = {
   // The NAS folders, mounted read-only into the container by nas/docker-compose.yml.
   moviesDir: env.MOVIES_DIR || '/library/movies',
   tvDir: env.TV_DIR || '/library/tv',
+  // Other libraries (anime, biographies, ...) are read from the folder above, when it is shared with the app.
+  libraryRoot: env.LIBRARY_ROOT || path.dirname(env.MOVIES_DIR || '/library/movies'),
+  // Libraries that are never read (photos, home videos). Names separated by commas, on top of the defaults.
+  ignoreLibraries: new RegExp(`^(photos?|pictures?|camera|home ?videos?|personal|recordings${(env.IGNORE_LIBRARIES || '').split(',').map((x) => x.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).filter(Boolean).map((x) => `|${x}`).join('')})$|vids$`, 'i'),
 
   tmdbKey: text(env.TMDB_API_KEY),
   tmdbBase: env.TMDB_BASE || 'https://api.themoviedb.org/3',

@@ -32,10 +32,13 @@ const TV_SCIFI_FANTASY = 10765;
 
 // Keywords (TMDB keyword names, lower case) that put a title in a genre or theme.
 const has = (keywords, words) => keywords.some((k) => words.some((w) => (w instanceof RegExp ? w.test(k) : k === w)));
-const HORROR_WORDS = [/horror/, 'slasher', 'haunted house', 'zombie', 'zombie apocalypse', 'paranormal', 'demonic possession', 'exorcism', 'ghost', 'haunting', 'creature feature', 'gore', 'splatter'];
-const MAFIA_WORDS = [/mafia/, /mob(ster)?$/, /gangster/, 'organized crime', /yakuza/, /triad/, /cartel/, /drug (dealer|dealing|lord|trafficking|smuggling|trade|kingpin|war|cartel|empire)/, /narco/, /cocaine/, /heroin/, /crime (family|boss|lord|syndicate)/, /camorra/, /ndrangheta/, /cosa nostra/, 'money laundering', 'methamphetamine', 'meth lab', 'drug addiction', 'drugs', 'gang', 'gang war'];
-const DETECTIVE_WORDS = [/detective/, /investigat/, 'whodunit', 'police procedural', 'serial killer', 'murder mystery', 'cold case', 'private investigator', /sleuth/, /homicide/, 'fbi agent', 'fbi', 'profiler', 'criminal investigation', 'murder investigation', 'missing person'];
+// Strong words count on their own; weak words only when there are two of them (a single "gore" or "drugs" says little).
+const HORROR = { strong: [/horror/, 'slasher', 'haunted house', 'demonic possession', 'exorcism', 'creature feature', 'splatter'], weak: ['zombie', 'zombie apocalypse', 'paranormal', 'ghost', 'haunting', 'gore', 'demon', 'possession', 'occult', 'witchcraft', 'cannibal', 'vampire', 'werewolf', 'curse', 'evil spirit'] };
+const MAFIA = { strong: [/mafia/, /mobster/, /gangster/, 'organized crime', /yakuza/, /\btriad/, /cartel/, /drug (dealer|dealing|lord|trafficking|smuggling|trade|kingpin|war|empire|mule)/, /narco/, /cocaine/, /heroin/, /crime (family|boss|lord|syndicate)/, /camorra/, /ndrangheta/, /cosa nostra/, 'mob boss', 'methamphetamine', 'meth lab', 'irish mob', 'russian mob', 'gang war'], weak: ['drugs', 'drug addiction', 'drug abuse', 'gang', 'money laundering', 'smuggling', 'heist', 'police corruption', 'crime lord'] };
+const DETECTIVE = { strong: [/detective/, 'whodunit', 'police procedural', 'murder investigation', 'private investigator', /sleuth/, 'murder mystery', 'cold case', 'homicide investigation', 'crime investigation'], weak: ['investigation', 'serial killer', 'fbi', 'fbi agent', 'profiler', 'missing person', 'homicide', 'police', 'murder', 'forensic', 'interrogation', 'police officer', 'criminal investigation'] };
 const SCIFI_WORDS = ['science fiction', /sci-?fi/, 'space', 'outer space', 'spaceship', 'space travel', 'alien', 'alien invasion', 'extraterrestrial', 'dystopia', 'post-apocalyptic future', 'time travel', 'artificial intelligence', 'cyberpunk', 'robot', 'android', 'cyborg', 'futuristic', 'parallel world', 'virtual reality', 'clone', 'genetic engineering', 'mars', 'space colony'];
+const hits = (keywords, words) => keywords.filter((k) => words.some((w) => (w instanceof RegExp ? w.test(k) : k === w))).length;
+const matches = (keywords, set) => hits(keywords, set.strong) >= 1 || hits(keywords, set.weak) >= 2;
 
 /** The app's genre ids for a title, from its TMDB genres and keyword names. */
 function genresOf(type, tmdbGenreIds = [], keywordNames = []) {
@@ -44,12 +47,12 @@ function genresOf(type, tmdbGenreIds = [], keywordNames = []) {
   for (const g of GENRES) if (!g.theme && (g[type] || []).some((x) => tmdbGenreIds.includes(x))) ids.add(g.id);
   if (type === 'tv') {
     if (tmdbGenreIds.includes(TV_SCIFI_FANTASY)) ids.add(has(kw, SCIFI_WORDS) || !kw.length ? 'scifi' : 'fantasy');
-    if (has(kw, HORROR_WORDS)) ids.add('horror');
+    if (matches(kw, HORROR)) ids.add('horror');
     if (tmdbGenreIds.includes(80) || tmdbGenreIds.includes(9648)) ids.add('thriller');
-  } else if (tmdbGenreIds.includes(53) && has(kw, HORROR_WORDS) && has(kw, [/horror/])) ids.add('horror');
+  } else if (tmdbGenreIds.includes(53) && hits(kw, [/horror/])) ids.add('horror');
   const crimeLike = ids.has('crime') || ids.has('thriller');
-  if (crimeLike && has(kw, MAFIA_WORDS)) ids.add('mafia');
-  if (has(kw, DETECTIVE_WORDS) || (ids.has('mystery') && ids.has('crime'))) ids.add('detective');
+  if (crimeLike && matches(kw, MAFIA)) ids.add('mafia');
+  if ((ids.has('crime') || ids.has('mystery')) && (matches(kw, DETECTIVE) || (ids.has('mystery') && ids.has('crime') && hits(kw, DETECTIVE.weak) >= 1))) ids.add('detective');
   return [...ids];
 }
 

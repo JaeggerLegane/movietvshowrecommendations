@@ -348,7 +348,8 @@ async function showStatus() {
       <p><span class="big">${L.movie.total}</span> movies · <span class="big">${L.tv.total}</span> TV shows</p>
       <p>Recognised: ${L.movie.matched} movies, ${L.tv.matched} shows. Read ${esc(when(L.scannedAt))}.</p>
       ${(L.problems || []).map((p) => `<p class="bad">${esc(p)}</p>`).join('')}
-      <p style="color:#888">${esc(L.dirs.movie)} · ${esc(L.dirs.tv)}</p>
+      ${(L.libraries || []).length ? `<table>${L.libraries.map((l) => `<tr><td>${esc(l.name)}</td><td>${[l.movie ? plural(l.movie, 'movie') : '', l.tv ? plural(l.tv, 'show') : ''].filter(Boolean).join(', ') || '0'}</td></tr>`).join('')}</table>` : ''}
+      ${(L.libraries || []).length <= 2 ? '<p class="warn" style="font-size:13px">Only the movies and tv folders are shared with the app, so your other libraries (anime, biographies, ...) are not counted. The README explains how to share them.</p>' : ''}
       ${unmatched('movie', 'movie')}${unmatched('tv', 'TV')}
     </div>
     <div class="panel"><h2>Recommendations</h2>

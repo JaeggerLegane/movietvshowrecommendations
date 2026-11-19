@@ -131,6 +131,17 @@ async function getDetails(type, id, maxAgeDays = 14) {
   return t;
 }
 
+/** Compilations and re-edits of movies you have ("The Godfather Trilogy: 1901-1980", "Kill Bill: The Whole Bloody Affair"). */
+function recutOf(d, owned) {
+  if (d.type !== 'movie') return null;
+  const name = library.norm(d.title);
+  const m = /^(.*?)\s+(trilogy|quadrilogy|duology|saga|collection|anthology|box set|double feature|complete)\b/.exec(name);
+  if (m && owned.series.has(library.seriesName(m[1]))) return 'A re-edit of movies on your NAS';
+  if ((d.runtime || 0) >= 230 && owned.series.has(library.seriesName(d.title))) return 'A re-edit of movies on your NAS';
+  if ((d.runtime || 0) >= 300) return 'A compilation of several movies (over 5 hours)';
+  return null;
+}
+
 /** Why a title is (not) recommended. Returns { ok: true, ... } or { ok: false, reason }. */
 function judge(d, rating, owned) {
   const year = yearOf(d.date);
@@ -141,6 +152,8 @@ function judge(d, rating, owned) {
   if (d.date > today()) return { ...base, ok: false, reason: `Not released yet (${d.date})` };
   if (year < config.minYear) return { ...base, ok: false, reason: `From ${year}, before ${config.minYear}` };
   if (owned.ids[d.type].has(d.id) || owned.has(d.type, d.title, year) || (d.original && owned.has(d.type, d.original, year))) return { ...base, ok: false, reason: 'Already on your NAS', owned: true };
+  const recut = recutOf(d, owned);
+  if (recut) return { ...base, ok: false, reason: recut, owned: recut.startsWith('A re-edit') };
   if (d.adult) return { ...base, ok: false, reason: 'Adult title' };
   if (d.type === 'tv' && d.tmdbGenres.some((g) => SKIP_TV_GENRES.has(g))) return { ...base, ok: false, reason: 'Reality, talk show, news, soap or kids show' };
   const counted = rating && rating.votes >= config.minVotes;
@@ -414,4 +427,4 @@ function info() {
 
 const genreList = () => GENRES.map((g) => ({ id: g.id, name: g.name, fav: FAVOURITES.includes(g.id) }));
 
-module.exports = { build, home, title, search, mark, info, genreList, status };
+module.exports = { build, home, title, search, mark, info, genreList, status, recutOf };

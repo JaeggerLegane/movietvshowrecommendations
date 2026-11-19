@@ -43,10 +43,10 @@ services:
     volumes:
       - ./code:/code
       - ./data:/data
-      # \\jaeggerlegane\media\libraries\... on the NAS itself. If your "media" shared folder
-      # is on another volume, change volume1 (File Station > right-click "media" > Properties shows it).
-      - /volume1/media/libraries/movies:/library/movies:ro
-      - /volume1/media/libraries/tv:/library/tv:ro
+      # \\jaeggerlegane\media\libraries on the NAS itself: movies, tv and your other libraries
+      # (anime, biographies, ...), so nothing you already have is recommended. Read-only.
+      # If your "media" shared folder is on another volume, change volume1.
+      - /volume1/media/libraries:/library:ro
     command:
       - sh
       - -c
